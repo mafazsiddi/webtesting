@@ -11,15 +11,15 @@ API without putting a key in the browser.
 
 ## Layout
 
-This project does **not** own the domain. `cleartax.email` belongs to another
+This project does **not** own the domain. `www.cleartax.email` belongs to the `wave-tracker`
 Vercel project that already hosts several tools by path (`/mira`,
 `/wave-tracker`); this one is mounted alongside them at `/webtesting` by a
 rewrite from that project.
 
 ```
-cleartax.email/webtesting        ->  webtesting/index.html
-cleartax.email/webtesting/api/*  ->  api/*.js       (via the internal rewrite)
-cleartax.email/webtesting/fonts/*->  webtesting/fonts/
+www.cleartax.email/webtesting        ->  webtesting/index.html
+www.cleartax.email/webtesting/api/*  ->  api/*.js       (via the internal rewrite)
+www.cleartax.email/webtesting/fonts/*->  webtesting/fonts/
 ```
 
 **Everything this project serves lives under `/webtesting/`.** That is a hard
@@ -43,7 +43,7 @@ vercel --prod     # production
 
 No build step. Static files are served as-is, `api/*.js` become Node functions,
 `vercel.json` supplies the internal rewrite and the security headers. Do not add
-the `cleartax.email` domain here — it stays with the project that owns it.
+the `www.cleartax.email` domain here — it stays with the project that owns it.
 
 Note the deployment URL (`https://<project>.vercel.app`); step 2 needs it.
 
@@ -81,7 +81,7 @@ deciding on before you go live:
 | Variable | Effect |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Enables the fix plan with no key in the browser. **On a public deployment this spends your tokens for every visitor** — leave it unset to make visitors bring their own. |
-| `ALLOWED_ORIGIN` | Restricts the API endpoints to one origin. Defaults to `*`, which lets any page call your proxy. Set it to `https://cleartax.email`. |
+| `ALLOWED_ORIGIN` | Restricts the API endpoints to one origin. Defaults to `*`, which lets any page call your proxy. Set it to `https://www.cleartax.email` — the `www` form, since that is the host the browser sends as `Origin`. |
 
 ## How the pieces fit
 

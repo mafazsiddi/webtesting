@@ -1,6 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "trailingSlash": false,
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/webtesting",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/webtesting/api/:path*",
@@ -29,7 +36,7 @@
       ]
     },
     {
-      "source": "/fonts/(.*)",
+      "source": "/webtesting/fonts/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
         { "key": "Access-Control-Allow-Origin", "value": "*" }

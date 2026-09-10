@@ -57,4 +57,17 @@ if (/fetch\(\s*["']\/api\//.test(source) || /["']\/api\/proxy/.test(source)) {
   process.exit(1);
 }
 
+/* The domain routes only /webtesting/* to this project, so any root-absolute
+   asset would be fetched from whichever project owns the domain instead. Check
+   the markup outside the script block, where the static <link>/<img> refs live. */
+const markup = html.slice(0, start) + html.slice(end);
+const escaping = [...markup.matchAll(/(?:href|src)="(\/[^"]*)"/g)]
+  .map(m => m[1])
+  .filter(p => !p.startsWith("/webtesting/"));
+if (escaping.length) {
+  console.error("check-html: asset(s) referenced outside the /webtesting prefix:");
+  escaping.forEach(p => console.error("  - " + p));
+  process.exit(1);
+}
+
 console.log("check-html: ok (" + stats.map(([k, v]) => v + " " + k).join(", ") + ")");

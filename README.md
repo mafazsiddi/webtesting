@@ -11,26 +11,30 @@ API without putting a key in the browser.
 
 ## Layout
 
-The tool is served under a path, not at the root, so the domain stays free for
-the main site:
+This project does **not** own the domain. `cleartax.email` belongs to another
+Vercel project that already hosts several tools by path (`/mira`,
+`/wave-tracker`); this one is mounted alongside them at `/webtesting` by a
+rewrite from that project.
 
 ```
-cleartax.email/                 index.html            placeholder home page
-cleartax.email/webtesting       webtesting/index.html the audit tool
-cleartax.email/webtesting/api/* -> rewritten to ->    api/*.js
-cleartax.email/fonts/*          fonts/                shared by both pages
+cleartax.email/webtesting        ->  webtesting/index.html
+cleartax.email/webtesting/api/*  ->  api/*.js       (via the internal rewrite)
+cleartax.email/webtesting/fonts/*->  webtesting/fonts/
 ```
 
-`index.html` at the root is a placeholder — replace it with the real home page.
-Nothing in the audit tool depends on it.
+**Everything this project serves lives under `/webtesting/`.** That is a hard
+constraint, not a preference: only that prefix is routed here, so a root-absolute
+`/fonts/…` would be fetched from the domain-owning project and 404. `npm run
+check` fails the build if any asset reference escapes the prefix.
 
-The tool reads its own prefix off `location.pathname` rather than hardcoding
-`/webtesting`, so `/webtesting`, `/webtesting/` and `/webtesting/index.html` all
-resolve their endpoints identically — the three URLs a plain `./api/…` would
-resolve three different ways. Moving the tool to another path needs no code
-change; only the rewrite in `vercel.json` has to follow it.
+The tool reads its own prefix off `location.pathname` rather than hardcoding it,
+so `/webtesting`, `/webtesting/` and `/webtesting/index.html` all resolve their
+endpoints identically — three URLs a plain `./api/…` would resolve three
+different ways.
 
-## Deploying on Vercel
+## Deploying
+
+### 1. This project
 
 ```
 vercel            # preview
@@ -38,10 +42,36 @@ vercel --prod     # production
 ```
 
 No build step. Static files are served as-is, `api/*.js` become Node functions,
-and `vercel.json` supplies the rewrite and the security headers.
+`vercel.json` supplies the internal rewrite and the security headers. Do not add
+the `cleartax.email` domain here — it stays with the project that owns it.
 
-Point the `cleartax.email` domain at the project in **Settings → Domains**. The
-audit tool is then at `cleartax.email/webtesting`.
+Note the deployment URL (`https://<project>.vercel.app`); step 2 needs it.
+
+### 2. The project that owns the domain
+
+Add a rewrite there, next to whatever already routes `/mira` and
+`/wave-tracker`:
+
+```json
+{
+  "rewrites": [
+    { "source": "/webtesting", "destination": "https://<project>.vercel.app/webtesting" },
+    { "source": "/webtesting/:path*", "destination": "https://<project>.vercel.app/webtesting/:path*" }
+  ]
+}
+```
+
+Both entries are needed — `/webtesting/:path*` does not match the bare
+`/webtesting`.
+
+Use a stable production URL as the destination, not a per-deployment preview URL,
+or the rewrite will pin to one build and stop following releases.
+
+If that project sets its own `Content-Security-Policy` on `/(.*)`, check it does
+not also apply to `/webtesting/*`. Two CSP headers intersect rather than
+override, and a stricter `style-src` or `connect-src` from the parent would stop
+audited pages loading their stylesheets — see the CSP note below for why those
+directives are deliberately loose here.
 
 ### Environment variables
 
@@ -51,7 +81,7 @@ deciding on before you go live:
 | Variable | Effect |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Enables the fix plan with no key in the browser. **On a public deployment this spends your tokens for every visitor** — leave it unset to make visitors bring their own. |
-| `ALLOWED_ORIGIN` | Restricts the API endpoints to one origin. Defaults to `*`, which lets any page call your proxy. Set it. |
+| `ALLOWED_ORIGIN` | Restricts the API endpoints to one origin. Defaults to `*`, which lets any page call your proxy. Set it to `https://cleartax.email`. |
 
 ## How the pieces fit
 
@@ -137,8 +167,8 @@ reference reappears, or if an own-origin endpoint is hardcoded at `/api/…`
 instead of going through `api()` — the regressions that would quietly undo the
 hardening or break the tool once it is served under a path.
 
-Fonts are self-hosted under `fonts/` (Latin subsets only) so there is no
-third-party request on page load.
+Fonts are self-hosted under `webtesting/fonts/` (Latin subsets only) so there is
+no third-party request on page load.
 
 ## What this cannot see
 

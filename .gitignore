@@ -1,0 +1,11 @@
+node_modules/
+.vercel
+.vscode/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+clearpage-*.md
+clearpage-*.json

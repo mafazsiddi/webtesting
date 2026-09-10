@@ -1,0 +1,14 @@
+{
+  "name": "clearpage-testing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Crawl a website and audit each page for SEO, accessibility, link health, technical hygiene and device compatibility.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "check": "node --check api/_guard.js && node --check api/proxy.js && node --check api/claude.js && node scripts/check-html.mjs && node scripts/test-guard.mjs"
+  }
+}

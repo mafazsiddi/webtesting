@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import vm from "node:vm";
 
-const html = await fs.readFile(new URL("../index.html", import.meta.url), "utf8");
+const html = await fs.readFile(new URL("../webtesting/index.html", import.meta.url), "utf8");
 
 const marker = /<script>\s*"use strict";/.exec(html);
 if (!marker) {
@@ -48,6 +48,12 @@ if (/fetch\(\s*["']https:\/\/api\.anthropic\.com/.test(source)) {
 }
 if (/fonts\.googleapis\.com|fonts\.gstatic\.com/.test(html)) {
   console.error("check-html: Google Fonts reference found — fonts are self-hosted under /fonts");
+  process.exit(1);
+}
+/* The tool is served under /webtesting, so a hardcoded root-absolute endpoint
+   would 404. Own-origin calls must go through api(), which derives the prefix. */
+if (/fetch\(\s*["']\/api\//.test(source) || /["']\/api\/proxy/.test(source)) {
+  console.error("check-html: own-origin endpoint hardcoded at /api/ — use api(name) so the base path is applied");
   process.exit(1);
 }
 

@@ -9,6 +9,27 @@ The audit is a single static page. Two serverless functions sit behind it — on
 to fetch pages the browser is not allowed to read, one to talk to the Anthropic
 API without putting a key in the browser.
 
+## Layout
+
+The tool is served under a path, not at the root, so the domain stays free for
+the main site:
+
+```
+cleartax.email/                 index.html            placeholder home page
+cleartax.email/webtesting       webtesting/index.html the audit tool
+cleartax.email/webtesting/api/* -> rewritten to ->    api/*.js
+cleartax.email/fonts/*          fonts/                shared by both pages
+```
+
+`index.html` at the root is a placeholder — replace it with the real home page.
+Nothing in the audit tool depends on it.
+
+The tool reads its own prefix off `location.pathname` rather than hardcoding
+`/webtesting`, so `/webtesting`, `/webtesting/` and `/webtesting/index.html` all
+resolve their endpoints identically — the three URLs a plain `./api/…` would
+resolve three different ways. Moving the tool to another path needs no code
+change; only the rewrite in `vercel.json` has to follow it.
+
 ## Deploying on Vercel
 
 ```
@@ -16,8 +37,11 @@ vercel            # preview
 vercel --prod     # production
 ```
 
-No build step. `index.html` is served as-is, `api/*.js` become Node functions,
-and `vercel.json` supplies the security headers.
+No build step. Static files are served as-is, `api/*.js` become Node functions,
+and `vercel.json` supplies the rewrite and the security headers.
+
+Point the `cleartax.email` domain at the project in **Settings → Domains**. The
+audit tool is then at `cleartax.email/webtesting`.
 
 ### Environment variables
 
@@ -108,9 +132,10 @@ vercel dev
 ```
 
 `npm run check` also fails if an iframe is created without a sandbox attribute,
-if the browser is pointed back at `api.anthropic.com`, or if a Google Fonts
-reference reappears — the three regressions that would quietly undo the
-hardening.
+if the browser is pointed back at `api.anthropic.com`, if a Google Fonts
+reference reappears, or if an own-origin endpoint is hardcoded at `/api/…`
+instead of going through `api()` — the regressions that would quietly undo the
+hardening or break the tool once it is served under a path.
 
 Fonts are self-hosted under `fonts/` (Latin subsets only) so there is no
 third-party request on page load.

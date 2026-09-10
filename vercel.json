@@ -1,5 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/webtesting/api/:path*",
+      "destination": "/api/:path*"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -30,6 +37,10 @@
     },
     {
       "source": "/api/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    },
+    {
+      "source": "/webtesting/api/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "no-store" }]
     }
   ]

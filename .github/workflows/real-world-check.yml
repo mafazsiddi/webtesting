@@ -1,0 +1,113 @@
+name: Real browsers and real devices
+
+# Free, on-demand cross-browser and cross-device screenshots — no BrowserStack
+# account, no per-run bill. Three independent jobs, each producing a
+# downloadable artifact on the run's summary page:
+#   desktop       -> real Chromium, Firefox and WebKit (Playwright)
+#   android       -> a real Android system image + Chrome, in an emulator
+#   ios-simulator -> real iOS + Safari/WebKit, in Xcode's simulator (needs macOS)
+#
+# None of these are physical hardware — that still needs either an actual
+# device in your hand or a paid device-cloud service. This is the closest
+# free equivalent: real OS and real engine, virtualised rather than owned.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL to check (must be publicly reachable from GitHub's runners)"
+        required: true
+      width:
+        description: "Desktop viewport width"
+        required: false
+        default: "1280"
+
+jobs:
+  desktop:
+    name: Desktop — Chromium, Firefox, WebKit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: node scripts/crossbrowser.mjs "${{ inputs.url }}" --width="${{ inputs.width }}" --out=crossbrowser-output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-screenshots
+          path: crossbrowser-output
+          retention-days: 14
+
+  android:
+    name: Real Android emulator + Chrome
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM (required for the emulator to boot at a usable speed)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Boot a real Android image, open the URL, capture the screen
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb shell input keyevent 82
+            adb shell am start -a android.intent.action.VIEW -d "${{ inputs.url }}"
+            sleep 10
+            adb exec-out screencap -p > android-screenshot.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-screenshot
+          path: android-screenshot.png
+          retention-days: 14
+
+  ios-simulator:
+    name: Real iOS Simulator + Safari
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot an iPhone simulator, open the URL in Safari, capture the screen
+        run: |
+          set -e
+          DEVICE_ID=$(xcrun simctl list -j devices available | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          candidates = []
+          for runtime, devices in data.items():
+              if "iOS" not in runtime:
+                  continue
+              for d in devices:
+                  if d.get("isAvailable") and "iPhone" in d.get("name", ""):
+                      candidates.append((runtime, d))
+          if not candidates:
+              sys.exit("no available iPhone simulator found")
+          candidates.sort(key=lambda c: c[0])
+          print(candidates[-1][1]["udid"])
+          ')
+          echo "booting $DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID"
+          xcrun simctl openurl "$DEVICE_ID" "${{ inputs.url }}"
+          sleep 10
+          xcrun simctl io "$DEVICE_ID" screenshot ios-screenshot.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-screenshot
+          path: ios-screenshot.png
+          retention-days: 14

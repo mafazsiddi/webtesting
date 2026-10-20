@@ -9,6 +9,10 @@
   },
   "scripts": {
     "dev": "vercel dev",
-    "check": "node --check api/_guard.js && node --check api/proxy.js && node --check api/claude.js && node scripts/check-html.mjs && node scripts/test-guard.mjs"
+    "check": "node --check api/_guard.js && node --check api/proxy.js && node --check api/claude.js && node --check api/browserstack.js && node scripts/check-html.mjs && node scripts/test-guard.mjs",
+    "crossbrowser": "node scripts/crossbrowser.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
   }
 }

@@ -81,6 +81,7 @@ deciding on before you go live:
 | Variable | Effect |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Enables the fix plan with no key in the browser. **On a public deployment this spends your tokens for every visitor** — leave it unset to make visitors bring their own. |
+| `BROWSERSTACK_USERNAME` / `BROWSERSTACK_ACCESS_KEY` | Enable real cross-browser and real-device screenshots. **On a public deployment this spends your BrowserStack quota for every visitor** who ticks the box — leave unset to keep that check manual. |
 | `ALLOWED_ORIGIN` | Restricts the API endpoints to one origin. Defaults to `*`, which lets any page call your proxy. Set it to `https://www.cleartax.email` — the `www` form, since that is the host the browser sends as `Origin`. |
 
 ## How the pieces fit
@@ -124,6 +125,62 @@ response into a readable message instead of a parse error.
 Note it sets `thinking: {type: "adaptive"}` and a `medium` effort. Thinking is on
 by default on current models and shares the `max_tokens` budget with the reply,
 which is why the ceiling is 16 K rather than the 6 K this used to send.
+
+### `api/browserstack.js` — real cross-browser and real-device screenshots
+
+Everything else in this tool renders in one browser, simulated. This endpoint is
+the one exception: when `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` are
+both set, ticking "Capture real screenshots (BrowserStack)" calls BrowserStack's
+Screenshots API to actually render the audited page in real Firefox, Chrome and
+Safari, plus real Android and iPhone hardware, and shows the images back in the
+report. Credentials are Basic-Auth and stay server-side; the browser never sees
+them. Starting a job (`?action=start`) is rate-limited separately and more
+tightly than listing supported browsers or polling a job already running
+(`?action=browsers`, `?action=status`), since starting a job is what spends the
+account's quota.
+
+### Free alternative, outside the live tool: Playwright + GitHub Actions
+
+Not every deployment wants a BrowserStack bill. `scripts/crossbrowser.mjs` and
+`.github/workflows/real-world-check.yml` give the same two checks for free —
+with one tradeoff: the results land as a downloadable artifact on a GitHub
+Actions run, not inline in the on-screen report, because the browser engines
+involved are far too large to bundle into a Vercel function.
+
+**Desktop — real Chromium, Firefox and WebKit.** [Playwright](https://playwright.dev)
+ships the actual browser binaries, not a simulation, so this is a genuine
+rendering difference check, not a heuristic one.
+
+```
+npm install                     # downloads playwright
+npx playwright install --with-deps chromium firefox webkit
+npm run crossbrowser -- https://example.com
+```
+
+Screenshots land in `crossbrowser-output/`.
+
+**Mobile — a real Android system image and a real iOS Simulator**, not
+BrowserStack's physical devices but not viewport emulation either: actual
+Android + Chrome running in an emulator, and actual iOS + Safari/WebKit
+running in Xcode's simulator. The only thing missing versus a physical phone
+is the physical phone — sensors, carrier quirks, real touch latency.
+
+Both of these and the desktop check run from one workflow, on demand, for
+free on GitHub's own runners:
+
+1. Open the repo on GitHub → **Actions** → **Real browsers and real devices**
+   → **Run workflow**.
+2. Enter the URL to check (it must be reachable from GitHub's runners — a
+   `localhost` or internal URL won't resolve).
+3. Wait for the three jobs to finish (desktop is fastest; the Android
+   emulator and iOS Simulator jobs each take several minutes to boot).
+4. Download `desktop-screenshots`, `android-screenshot` and
+   `ios-screenshot` from the run's summary page.
+
+Costs nothing on a public repo. On a private repo, note that macOS runners
+(the iOS Simulator job) bill Actions minutes at a 10× multiplier against your
+plan's included minutes — the desktop and Android jobs run on ordinary Linux
+runners at 1×.
 
 ### Rendering pages for measurement
 

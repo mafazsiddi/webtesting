@@ -97,6 +97,12 @@ padding:10px 18px;font-weight:500;cursor:pointer
 .measure .m dt{color:var(--ink3);font-family:var(--sans)}
 .measure .m dd{margin:0;text-align:right}
 .measure .m dd.bad{color:var(--crit)} .measure .m dd.good{color:var(--pass)}
+.xgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:14px}
+.xgrid .shot{background:var(--panel);border:1px solid var(--rule);border-radius:var(--r);overflow:hidden}
+.xgrid .shot h4{margin:0;padding:8px 10px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--rule)}
+.xgrid .shot img{display:block;width:100%;height:auto;background:#fff}
+.xgrid .shot .wait,.xgrid .shot .fail{padding:24px 10px;text-align:center;font-size:12.5px;color:var(--ink3)}
+.xgrid .shot .fail{color:var(--crit)}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:var(--r);padding:18px;margin-bottom:8px}
 .panel h4{margin:0 0 10px;font-size:14px;font-weight:600}
 .panel h4 span{font-family:var(--mono);font-size:12px;color:var(--ink3);font-weight:400;margin-left:8px}
@@ -367,6 +373,7 @@ footer code{font-family:var(--mono);font-size:12px;color:var(--ink2)}
 <label class="check"><input type="checkbox" id="optForms" checked> Test forms and validation</label>
 <label class="check"><input type="checkbox" id="optSec" checked> Probe transport and headers</label>
 <label class="check"><input type="checkbox" id="optAdvisor"> Ask Claude for a fix plan</label>
+<label class="check"><input type="checkbox" id="optXBrowser"> Capture real screenshots (BrowserStack)</label>
 <span class="spacer"></span>
 <button class="ghost small" id="testBtn" type="button">Test connection</button>
 </div>
@@ -491,6 +498,12 @@ Enter a URL above. Every page found gets checked for SEO, accessibility, link he
 <section class="block" id="advisorBlock" hidden>
 <div class="blockHead"><h2>Fix plan</h2><span class="count">written by Claude from the findings</span></div>
 <div class="advisor" id="advisor"></div>
+</section>
+
+<section class="block" id="xbrowserBlock" hidden>
+<div class="blockHead"><h2>Real browsers and real devices</h2><span class="count" id="xbrowserNote"></span></div>
+<p>Rendered by BrowserStack, not simulated — this is the one part of the report that is not this tool's own single engine.</p>
+<div class="xgrid" id="xbrowserGrid"></div>
 </section>
 
 <section class="block" id="copyBlock" hidden>
@@ -2204,6 +2217,75 @@ page: p => {
 const m = p.responsive && p.responsive[390];
 if (!m || !m.ok || !m.overlays || !m.overlays.length) return [];
 return m.overlays.slice(0, 3).map(o => ({ detail: o.pct + "% of viewport height, position:" + o.pos, evidence: o.sel }));
+} },
+
+{ id: "rs-fluid-break", cat: "Device", sev: "warning", title: "Layout breaks between two tested widths",
+why: "Real breakpoints rarely land on exactly 390, 768 or 1280px. Sampling several widths in between catches the point where reflow, overlap or a horizontal scrollbar actually starts — the gap a three-point check alone would miss.",
+fix: "Resize the browser slowly through the flagged range and fix whatever triggers the scrollbar.",
+page: p => {
+const pts = fluidPoints(p);
+const widths = Object.keys(pts).map(Number).sort((a, b) => a - b);
+if (widths.length < 2) return [];
+const out = [];
+for (let i = 1; i < widths.length; i++) {
+const w0 = widths[i - 1], w1 = widths[i];
+const o0 = pts[w0] || 0, o1 = pts[w1] || 0;
+if (o0 <= 4 && o1 > 4) out.push({ detail: "fits at " + w0 + "px, " + o1 + "px of overflow by " + w1 + "px", evidence: w0 + "–" + w1 + "px" });
+}
+return out.slice(0, 4);
+} },
+
+{ id: "ui-element-overlap", cat: "Device", sev: "notice", title: "Elements overlap on the page",
+why: "Measured at 390px: two elements that each carry their own text occupy more than half of each other's box. Decorative overlap (an icon on a button, a badge on an avatar) is normally small relative to both boxes, so this is a candidate list rather than a verdict — confirm by eye, since some overlap is intentional.",
+fix: "Check z-index, negative margins and absolute positioning around the pair listed in evidence.",
+page: p => {
+const m = p.responsive && p.responsive[390];
+if (!m || !m.collisions || !m.collisions.length) return [];
+return m.collisions.slice(0, 4).map(c => ({ detail: c.pct + "% overlap", evidence: c.a + " × " + c.b }));
+} },
+
+{ id: "ui-section-spacing", cat: "Device", sev: "notice", title: "Inconsistent spacing between sections",
+why: "Measured as the vertical gap between each top-level section on the page at 390px. A handful of repeating values is a spacing scale; gaps that never repeat across a wide range usually means spacing was set by eye, section by section.",
+fix: "Pick two or three gap sizes for a spacing scale and apply them consistently between sections.",
+page: p => {
+const m = p.responsive && p.responsive[390];
+const gaps = m && m.sectionGaps;
+if (!gaps || gaps.length < 4) return [];
+const buckets = new Map();
+gaps.forEach(g => { const k = Math.round(g / 12) * 12; buckets.set(k, (buckets.get(k) || 0) + 1); });
+const repeated = Array.from(buckets.values()).some(c => c >= 2);
+const sorted = gaps.slice().sort((a, b) => a - b);
+const min = sorted[0], max = sorted[sorted.length - 1];
+if (repeated || max - min < 32) return [];
+return [{ detail: gaps.length + " section gaps, no two alike, ranging from " + min + "px to " + max + "px", evidence: gaps.join("px, ") + "px" }];
+} },
+
+{ id: "ui-font-family-mixed", cat: "Device", sev: "notice", title: "Mixed font families within one role on the page",
+why: "Measured from computed styles across every heading, paragraph, link and button on the page at 390px. More than one real font-family rendering in the same role is usually a leftover default, an unconverted import, or copy pasted from somewhere else — not a deliberate pairing.",
+fix: "Pick one family per role and trace where the other one is coming from — check embeds, pasted widgets and third-party components first.",
+page: p => {
+const t = p.responsive && p.responsive[390] && p.responsive[390].typography;
+if (!t) return [];
+const out = [];
+Object.entries(t).forEach(([role, data]) => {
+const variants = significantVariants(data.families);
+if (variants.length > 1) out.push({ detail: role + " uses " + variants.length + " different font families", evidence: variants.map(([f, c]) => f + " (" + c + ")").join(", ") });
+});
+return out;
+} },
+
+{ id: "ui-font-color-mixed", cat: "Device", sev: "notice", title: "Mixed text colours within one role on the page",
+why: "Measured from computed styles across every heading, paragraph, link and button on the page at 390px. A role that renders in several different colours usually isn't a deliberate accent — it's inconsistent markup or a style that didn't fully apply.",
+fix: "Trace each colour back to its rule and consolidate to the one the design system defines for that role.",
+page: p => {
+const t = p.responsive && p.responsive[390] && p.responsive[390].typography;
+if (!t) return [];
+const out = [];
+Object.entries(t).forEach(([role, data]) => {
+const variants = significantVariants(data.colors);
+if (variants.length > 1) out.push({ detail: role + " renders in " + variants.length + " different colours", evidence: variants.map(([c, n]) => c + " (" + n + ")").join(", ") });
+});
+return out;
 } }
 ];
 
@@ -2237,7 +2319,14 @@ const PASS_NOTES = {
 "rs-overflow": "Nothing spills off a 390px screen.",
 "rs-no-reflow": "The layout genuinely changes with screen width.",
 "rs-tap-targets": "Tap targets clear 24px.",
-"no-https": "The site is served over HTTPS."
+"no-https": "The site is served over HTTPS.",
+"rs-fluid-break": "No break found between any two sampled widths from 320 to 1920px.",
+"ui-element-overlap": "No overlapping elements found at 390px.",
+"ui-section-spacing": "Section spacing follows a repeating scale.",
+"ui-font-family-mixed": "Each role renders in one font family on the page.",
+"ui-font-color-mixed": "Each role renders in one colour on the page.",
+"type-family-site": "The same role renders in the same font family on every measured page.",
+"type-color-site": "The same role renders in the same colour on every measured page."
 };
 /* some passes are only meaningful if the check could actually run */
 const PASS_GUARDS = {
@@ -2246,10 +2335,20 @@ const PASS_GUARDS = {
 "bad-fragment": () => state.pages.some(p => (p.fragments || []).length),
 "rs-overflow": () => measuredOk(),
 "rs-no-reflow": () => measuredOk(),
-"rs-tap-targets": () => measuredOk()
+"rs-tap-targets": () => measuredOk(),
+"rs-fluid-break": () => state.pages.some(p => p.fluid && Object.keys(p.fluid).length),
+"ui-element-overlap": () => measuredOk(),
+"ui-section-spacing": () => measuredOk(),
+"ui-font-family-mixed": () => measuredOk(),
+"ui-font-color-mixed": () => measuredOk(),
+"type-family-site": () => typeSampledPages() >= 2,
+"type-color-site": () => typeSampledPages() >= 2
 };
 function measuredOk() {
 return state.pages.some(p => p.responsive && p.responsive[390] && p.responsive[390].ok);
+}
+function typeSampledPages() {
+return state.pages.filter(p => p.responsive && p.responsive[390] && p.responsive[390].typography).length;
 }
 function computePasses() {
 const fired = new Set(state.findings.map(f => f.ruleId));
@@ -2270,7 +2369,21 @@ const out = [
 "Colour contrast defined in external stylesheets. Only inline colour pairs are calculated here.",
 "Anything drawn after load by JavaScript, and anything behind a login."
 ];
-if (!measuredOk()) out.push("Layout at 390, 768 and 1280px was not measured this run, so overflow, tap targets and rendered font sizes are unknown.");
+if (!measuredOk()) {
+out.push("Layout at 390, 768 and 1280px was not measured this run, so overflow, tap targets and rendered font sizes are unknown.");
+out.push("Font family and colour consistency, section spacing and element overlap were not checked this run either — they're read from the same measurement pass. Tick “Measure layout at 3 widths” and run again to get those checks under Device.");
+}
+if (!state.pages.some(p => p.fluid && Object.keys(p.fluid).length))
+out.push("The fluid-resize sweep (widths between 320 and 1920px, looking for a break between two tested widths) did not run this time — tick “Measure layout at 3 widths” and run again.");
+if (typeSampledPages() < 2)
+out.push("Font and colour consistency could only be compared across pages once at least two pages are measured — raise “Pages to measure” and run again.");
+const xb = state.crossBrowser, xbDone = xb && xb.shots ? xb.shots.filter(s => s.state === "done").length : 0;
+if (xbDone) {
+out.push("The real-browser and real-device screenshots above are static images — confirm interactions (menus, forms, hover states, scroll) by hand on at least one of them, since a screenshot can't show behaviour.");
+if (xb.shots.length > xbDone) out.push((xb.shots.length - xbDone) + " of the BrowserStack target(s) above did not finish rendering — check those by hand.");
+} else {
+out.push("Cross-browser rendering in real Firefox, Chrome and Safari, and UI testing on real Android and iPhone hardware — tick “Capture real screenshots (BrowserStack)” and set BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY on the deployment to automate this. Without it, the Compatibility checks and the emulated device matrix above are the closest automated proxy, and only opening the page on each real browser and device confirms it actually looks and behaves right.");
+}
 const unver = Array.from(state.refChecks.values()).filter(c => c.ok === null).length;
 if (unver) out.push(unver + " link" + (unver === 1 ? "" : "s") + " could not be verified because the check was blocked or rate limited — unknown, not broken.");
 if (!state.refChecks.size) out.push("No links or resources were checked, so broken targets are unknown.");
@@ -2686,7 +2799,67 @@ x.sig.sheets + " \u00b7 images " + x.sig.images + " \u00b7 links " + x.sig.links
 { id: "no-https", cat: "Technical", sev: "critical", title: "Site is served over HTTP",
 why: "Browsers mark it as not secure, forms are exposed in transit, and search ranks it lower.",
 fix: "Install a certificate and redirect all http traffic to https.",
-site: pages => pages.filter(p => p.url.startsWith("http:")).map(p => ({ page: p.url, detail: "no TLS" })) }
+site: pages => pages.filter(p => p.url.startsWith("http:")).map(p => ({ page: p.url, detail: "no TLS" })) },
+
+{ id: "type-family-site", cat: "Device", sev: "notice", title: "Font family for the same role differs across pages",
+why: "Each measured page's dominant font family per role (heading, body, link, button) is compared. A role that changes family from page to page reads as an unfinished rebrand or a template that didn't get updated everywhere.",
+fix: "Standardise the family per role in the shared stylesheet rather than per template or page.",
+site: pages => {
+const byRole = {};
+pages.forEach(p => {
+const t = p.responsive && p.responsive[390] && p.responsive[390].typography;
+if (!t) return;
+Object.entries(t).forEach(([role, data]) => {
+const top = data.families && data.families[0];
+if (!top) return;
+(byRole[role] || (byRole[role] = new Map())).set(p.url, top[0]);
+});
+});
+const out = [];
+Object.entries(byRole).forEach(([role, m]) => {
+if (m.size < 2) return;
+const families = new Set(m.values());
+if (families.size < 2) return;
+const byFamily = new Map();
+m.forEach((fam, url) => (byFamily.get(fam) || byFamily.set(fam, []).get(fam)).push(url));
+out.push({
+page: Array.from(m.keys())[0],
+detail: role + " renders in " + families.size + " different font families across " + m.size + " measured pages",
+evidence: Array.from(byFamily.entries()).map(([fam, urls]) => fam + ": " + urls.length + " page(s)").join(" · ")
+});
+});
+return out;
+} },
+
+{ id: "type-color-site", cat: "Device", sev: "notice", title: "Text colour for the same role differs across pages",
+why: "Each measured page's dominant colour per role (heading, body, link, button) is compared. A role that changes colour from page to page, outside of an obvious section theme, usually means the token wasn't applied consistently.",
+fix: "Pull the colour from the shared design tokens rather than setting it per page or component.",
+site: pages => {
+const byRole = {};
+pages.forEach(p => {
+const t = p.responsive && p.responsive[390] && p.responsive[390].typography;
+if (!t) return;
+Object.entries(t).forEach(([role, data]) => {
+const top = data.colors && data.colors[0];
+if (!top) return;
+(byRole[role] || (byRole[role] = new Map())).set(p.url, top[0]);
+});
+});
+const out = [];
+Object.entries(byRole).forEach(([role, m]) => {
+if (m.size < 2) return;
+const colors = new Set(m.values());
+if (colors.size < 2) return;
+const byColor = new Map();
+m.forEach((col, url) => (byColor.get(col) || byColor.set(col, []).get(col)).push(url));
+out.push({
+page: Array.from(m.keys())[0],
+detail: role + " renders in " + colors.size + " different colours across " + m.size + " measured pages",
+evidence: Array.from(byColor.entries()).map(([col, urls]) => col + ": " + urls.length + " page(s)").join(" · ")
+});
+});
+return out;
+} }
 ];
 
 /* ---------- stylesheet sampling (for responsive check) ---------- */
@@ -2887,6 +3060,114 @@ return trunc(tag + id + cls, 48);
 }
 const fileExt = u => { const m = String(u).split("?")[0].match(/\.([a-z0-9]{2,5})$/i); return m ? m[1].toLowerCase() : ""; };
 
+/* font family and colour actually rendered, grouped by role. Every instance is
+sampled rather than the first, so a page that mixes fonts within one role (not
+just between roles) is caught, and the majority value is what gets compared
+page-to-page. */
+const TYPE_GROUPS = {
+heading: "h1,h2,h3,h4,h5,h6",
+body: "p,li,td,dd,blockquote",
+link: "a",
+button: "button,[role=button],input[type=submit],input[type=button]"
+};
+/* drops one-off stragglers (a single mis-styled element) so only variants with
+real weight behind them count as a genuine mix */
+function significantVariants(entries) {
+const total = entries.reduce((s, [, c]) => s + c, 0);
+if (!total) return [];
+return entries.filter(([, c]) => c >= 2 && c / total >= 0.12);
+}
+function sampleTypography(doc, win) {
+const result = {};
+Object.entries(TYPE_GROUPS).forEach(([key, sel]) => {
+const fams = new Map(), cols = new Map();
+let els; try { els = doc.querySelectorAll(sel); } catch { els = []; }
+Array.from(els).slice(0, 400).forEach(el => {
+const own = Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim().length > 0);
+if (!own) return;
+let st; try { st = win.getComputedStyle(el); } catch { st = null; }
+if (!st) return;
+const fam = (st.fontFamily || "").split(",")[0].replace(/["']/g, "").trim().toLowerCase();
+if (fam) fams.set(fam, (fams.get(fam) || 0) + 1);
+if (st.color) cols.set(st.color, (cols.get(st.color) || 0) + 1);
+});
+result[key] = {
+families: Array.from(fams.entries()).sort((a, b) => b[1] - a[1]),
+colors: Array.from(cols.entries()).sort((a, b) => b[1] - a[1])
+};
+});
+return result;
+}
+
+/* vertical gaps between the page's top-level visual sections. A handful of
+distinct rhythms (e.g. 48/96px) is normal; gaps scattered across a wide range
+with no pattern usually means spacing was eyeballed per-section rather than
+pulled from a scale. */
+function sampleSectionGaps(doc, win) {
+let cand; try { cand = doc.querySelectorAll("body > *, main > *, [class*='section'], section"); } catch { cand = []; }
+const seen = new Set();
+const boxes = [];
+Array.from(cand).forEach(el => {
+if (seen.has(el)) return;
+let st; try { st = win.getComputedStyle(el); } catch { st = null; }
+if (!st || st.display === "none" || st.visibility === "hidden" || st.position === "fixed") return;
+let r; try { r = el.getBoundingClientRect(); } catch { return; }
+if (!r || r.height < 40 || r.width < 100) return;
+seen.add(el);
+boxes.push(r);
+});
+boxes.sort((a, b) => a.top - b.top);
+const gaps = [];
+for (let i = 1; i < boxes.length; i++) {
+const g = Math.round(boxes[i].top - boxes[i - 1].bottom);
+if (g >= 4 && g < 500) gaps.push(g);
+}
+return gaps;
+}
+
+/* elements whose boxes substantially overlap without one containing the
+other. Deliberate overlap (an icon inside a button, a badge on an avatar) is
+small relative to both boxes, so only a heavy overlap between two boxes that
+each carry their own text is flagged — still a heuristic, worth a human look
+rather than an automatic fail. */
+function sampleCollisions(doc, win) {
+let all; try { all = doc.body.querySelectorAll("*"); } catch { all = []; }
+const boxed = [];
+Array.from(all).slice(0, 500).forEach(el => {
+const txt = (el.textContent || "").trim();
+if (txt.length < 2) return;
+let st; try { st = win.getComputedStyle(el); } catch { st = null; }
+if (!st || st.display === "none" || st.visibility === "hidden" || st.position === "fixed" || st.position === "sticky") return;
+let r; try { r = el.getBoundingClientRect(); } catch { return; }
+if (!r || r.width < 20 || r.height < 12) return;
+boxed.push({ el, r });
+});
+const hits = [];
+for (let i = 0; i < boxed.length && hits.length < 6; i++) {
+for (let j = i + 1; j < boxed.length && hits.length < 6; j++) {
+const A = boxed[i], B = boxed[j];
+if (A.el.contains(B.el) || B.el.contains(A.el)) continue;
+const ix = Math.min(A.r.right, B.r.right) - Math.max(A.r.left, B.r.left);
+const iy = Math.min(A.r.bottom, B.r.bottom) - Math.max(A.r.top, B.r.top);
+if (ix <= 0 || iy <= 0) continue;
+const overlapArea = ix * iy;
+const smaller = Math.min(A.r.width * A.r.height, B.r.width * B.r.height);
+if (smaller > 0 && overlapArea / smaller > 0.5)
+hits.push({ a: selectorFor(A.el), b: selectorFor(B.el), pct: Math.round((overlapArea / smaller) * 100) });
+}
+}
+return hits;
+}
+
+/* a cheap pass for the fluid-width sweep: scrollWidth only, no element walk */
+function quickOverflow(doc, w) {
+const de = doc.documentElement, body = doc.body;
+if (!de || !body) return null;
+const scrollWidth = Math.max(de.scrollWidth || 0, body.scrollWidth || 0);
+if (!scrollWidth) return null;
+return { ok: true, width: w, scrollWidth, overflow: Math.max(0, scrollWidth - w) };
+}
+
 function measureDoc(doc, win, w, deep, prof) {
 const P = Object.assign({ dpr: 2, tap: 24, viewH: RS_HEIGHT }, prof || {});
 const de = doc.documentElement, body = doc.body;
@@ -3049,6 +3330,9 @@ const nav = (win.performance.getEntriesByType("navigation") || [])[0];
 if (nav) out.timing = { dcl: Math.round(nav.domContentLoadedEventEnd || 0), load: Math.round(nav.loadEventEnd || 0) };
 } catch { }
 try { out.fonts = win.document.fonts ? win.document.fonts.size : null; } catch { out.fonts = null; }
+try { out.typography = sampleTypography(doc, win); } catch { out.typography = null; }
+try { out.sectionGaps = sampleSectionGaps(doc, win); } catch { out.sectionGaps = null; }
+try { out.collisions = sampleCollisions(doc, win); } catch { out.collisions = null; }
 /* out.vitals is filled in by the caller from the separate probe frame */
 return out;
 }
@@ -3095,6 +3379,55 @@ if (v) out[w].vitals = v;
 }
 host.remove();
 return out;
+}
+
+/* ---------- fluid-width sweep ----------
+390/768/1280 are three fixed samples; a break can sit between any pair of
+them. This re-renders at several more widths and reads scrollWidth only (no
+element walk), which is cheap enough to run across the sweep without the cost
+of a full deep measurement at each width. */
+const RS_SWEEP_WIDTHS = [320, 480, 600, 900, 1024, 1440, 1920];
+async function measureFluidSweep(p) {
+const host = document.createElement("div");
+host.setAttribute("aria-hidden", "true");
+host.style.cssText = "position:fixed;left:-20000px;top:0;width:1px;height:1px;overflow:hidden;pointer-events:none";
+document.body.appendChild(host);
+const out = {};
+for (const w of RS_SWEEP_WIDTHS) {
+if (state.abort) break;
+const f = document.createElement("iframe");
+f.setAttribute("title", "fluid sweep " + w + "px");
+f.setAttribute("aria-hidden", "true");
+f.setAttribute("sandbox", "allow-same-origin");
+f.style.cssText = "width:" + w + "px;height:" + RS_HEIGHT + "px;border:0";
+host.appendChild(f);
+await new Promise(res => {
+let done = false;
+const fin = () => { if (done) return; done = true; clearInterval(poll); res(); };
+f.addEventListener("load", fin);
+const t0 = Date.now();
+const poll = setInterval(() => {
+let ready = false;
+try { ready = !!(f.contentDocument && f.contentDocument.readyState === "complete"); } catch { ready = true; }
+if (ready || Date.now() - t0 > 5000) fin();
+}, 120);
+try { f.srcdoc = renderable(p, null); } catch { fin(); }
+});
+await sleep(250);
+try { out[w] = f.contentDocument ? quickOverflow(f.contentDocument, w) : null; }
+catch { out[w] = null; }
+f.remove();
+}
+host.remove();
+p.fluid = out;
+}
+/* merges the fluid sweep with the three measured widths into one width→overflow
+map, so a break can be found between any two adjacent widths that were tested */
+function fluidPoints(p) {
+const pts = {};
+if (p.responsive) [390, 768, 1280].forEach(w => { const m = p.responsive[w]; if (m && m.ok) pts[w] = m.overflow; });
+if (p.fluid) Object.keys(p.fluid).forEach(w => { const m = p.fluid[w]; if (m && m.ok) pts[Number(w)] = m.overflow; });
+return pts;
 }
 
 /* ---------- device profiles ----------
@@ -3203,7 +3536,12 @@ const rest = candidates.filter(p => p !== startPage);
 const step = Math.max(1, Math.floor(rest.length / Math.max(1, budget - picked.length)));
 for (let i = 0; i < rest.length && picked.length < budget; i += step) picked.push(rest[i]);
 log("measuring layout of " + picked.length + " page(s) at 390, 768 and 1280px");
-for (const p of picked) {
+/* the fluid sweep and the per-element font/colour/spacing/overlap samples add
+real time per page, so they run for a smaller subset \u2014 the start page always,
+then as many more as the budget allows up to four */
+const fluidBudget = Math.min(picked.length, 4);
+for (let idx = 0; idx < picked.length; idx++) {
+const p = picked[idx];
 if (state.abort) break;
 p.responsive = await measurePage(p);
 const m = p.responsive[390];
@@ -3214,6 +3552,7 @@ log(" " + esc(shortPath(p.url)) + " \u00b7 390px \u2192 " +
 } else {
 log(" " + esc(shortPath(p.url)) + ' <span class="dim">could not be measured: ' + esc((m && m.reason) || "unknown") + "</span>", "dim");
 }
+if (idx < fluidBudget && !state.abort) await measureFluidSweep(p);
 }
 }
 
@@ -4866,6 +5205,117 @@ renderPasses();
 renderManual();
 }
 
+/* ---------- real cross-browser and real-device screenshots ----------
+Everything else in this report is this one browser, measured or emulated.
+This is the one part that is genuinely rendered elsewhere: BrowserStack's
+Screenshots API, called through api/browserstack.js so the account
+credentials never reach this page. */
+let bsBrowserCache = null;
+async function bsFetchBrowsers() {
+if (bsBrowserCache) return bsBrowserCache;
+const res = await fetch(api("browserstack") + "?action=browsers");
+const text = await res.text();
+let data;
+try { data = JSON.parse(text); } catch { throw new Error("BrowserStack returned something unreadable"); }
+if (!res.ok) throw new Error((data && data.error) || ("BrowserStack " + res.status));
+if (!Array.isArray(data) || !data.length) throw new Error("BrowserStack returned no supported browsers or devices");
+bsBrowserCache = data;
+return data;
+}
+
+/* one desktop Chrome, Firefox and Safari, plus one real iPhone and one real
+Android device — five targets keeps a single job inside a sane time and
+BrowserStack-quota budget. Falls back loosely if the exact OS hint isn't
+present, since BrowserStack's own supported matrix shifts over time. */
+function bsPickTargets(list) {
+const desktop = list.filter(e => !e.device);
+const mobile = list.filter(e => e.device && (e.real_mobile === true || e.real_mobile === "true"));
+const findBrowser = (name, osHint) => {
+const byName = desktop.filter(e => (e.browser || "").toLowerCase() === name);
+const hinted = osHint ? byName.filter(e => (e.os || "").toLowerCase().includes(osHint)) : [];
+return (hinted[0] || byName[0] || null);
+};
+const findDevice = re => mobile.find(e => re.test(e.device || "")) || null;
+const picks = [
+findBrowser("chrome", "win"),
+findBrowser("firefox", "win"),
+findBrowser("safari", "os x"),
+findDevice(/iphone/i),
+findDevice(/galaxy|pixel/i)
+].filter(Boolean);
+const seen = new Set();
+return picks.filter(p => {
+const k = JSON.stringify(p);
+if (seen.has(k)) return false;
+seen.add(k);
+return true;
+}).slice(0, 5);
+}
+
+function bsLabel(b) {
+if (b.device) return b.device + (b.os_version ? " (" + b.os_version + ")" : "");
+return [b.browser, b.browser_version, "on", b.os, b.os_version].filter(Boolean).join(" ");
+}
+
+async function bsStartJob(url, browsers) {
+const res = await fetch(api("browserstack") + "?action=start", {
+method: "POST", headers: { "content-type": "application/json" },
+body: JSON.stringify({ url, browsers })
+});
+const data = await res.json().catch(() => ({}));
+if (!res.ok) throw new Error(data.error || ("BrowserStack could not start the job (" + res.status + ")"));
+return data;
+}
+
+async function bsPollJob(jobId) {
+const res = await fetch(api("browserstack") + "?action=status&job=" + encodeURIComponent(jobId));
+const data = await res.json().catch(() => ({}));
+if (!res.ok) throw new Error(data.error || ("BrowserStack status check failed (" + res.status + ")"));
+return data;
+}
+
+async function captureCrossBrowser() {
+log("asking BrowserStack for real browser and device screenshots");
+const list = await bsFetchBrowsers();
+const targets = bsPickTargets(list);
+if (!targets.length) throw new Error("no matching browsers or devices were found in BrowserStack's current list");
+const job = await bsStartJob(state.start, targets);
+const jobId = job.job_id;
+if (!jobId) throw new Error("BrowserStack did not return a job id");
+state.crossBrowser = { jobId, shots: job.screenshots || targets.map(t => Object.assign({ state: "pending" }, t)) };
+renderCrossBrowser();
+const deadline = Date.now() + 90_000;
+while (Date.now() < deadline && !state.abort) {
+await sleep(4000);
+const data = await bsPollJob(jobId);
+state.crossBrowser.shots = data.screenshots || state.crossBrowser.shots;
+renderCrossBrowser();
+const pending = state.crossBrowser.shots.filter(s => s.state === "pending" || s.state === "processing");
+if (!pending.length) break;
+}
+const done = state.crossBrowser.shots.filter(s => s.state === "done").length;
+log("BrowserStack · " + done + " of " + state.crossBrowser.shots.length + " screenshot(s) ready");
+}
+
+function renderCrossBrowser() {
+const cb = state.crossBrowser;
+if (!cb || !cb.shots || !cb.shots.length) { $("#xbrowserBlock").hidden = true; return; }
+const done = cb.shots.filter(s => s.state === "done").length;
+$("#xbrowserNote").textContent = done + " of " + cb.shots.length + " ready";
+$("#xbrowserGrid").innerHTML = cb.shots.map(s => {
+const label = esc(bsLabel(s));
+if (s.state === "done" && s.image_url) {
+return '<div class="shot"><h4>' + label + '</h4><img loading="lazy" src="' + esc(s.image_url) + '" alt="' + label + ' screenshot"></div>';
+}
+if (s.state === "error" || s.state === "timeout") {
+return '<div class="shot"><h4>' + label + '</h4><div class="fail">capture failed</div></div>';
+}
+return '<div class="shot"><h4>' + label + '</h4><div class="wait">rendering…</div></div>';
+}).join("");
+$("#xbrowserBlock").hidden = false;
+renderManual();
+}
+
 /* ---------- exports ---------- */
 function download(name, text, type) {
 const b = new Blob([text], { type: type || "text/plain;charset=utf-8" });
@@ -5161,12 +5611,23 @@ $("#fatal").innerHTML = '<div class="err">The audit finished, but the Claude pas
 renderManual();
 }
 }
+
+if (state.opts.crossBrowser) {
+try {
+await captureCrossBrowser();
+} catch (err) {
+log('BrowserStack capture failed <span class="bad">' + esc(err.message) + "</span>");
+$("#fatal").innerHTML += '<div class="err">The audit finished, but the real browser/device capture failed: ' + esc(err.message) +
+". Check BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY on the deployment and run again \u2014 the rest of the audit is unaffected.</div>";
+renderManual();
+}
+}
 }
 
 function startUI() {
 $("#emptyState").hidden = true;
 ["#summaryBlock", "#issuesBlock", "#refsBlock", "#ledgerBlock", "#previewBlock",
-"#advisorBlock", "#copyBlock", "#goodBlock", "#manualBlock",
+"#advisorBlock", "#xbrowserBlock", "#copyBlock", "#goodBlock", "#manualBlock",
 "#perfBlock", "#compatBlock", "#formsBlock", "#secBlock", "#mobileBlock", "#devBlock",
 "#cwvBlock"].forEach(x => { $(x).hidden = true; });
 $("#diag").innerHTML = "";
@@ -5193,6 +5654,7 @@ sitemap: $("#optSitemap").checked,
 subdomains: $("#optSub").checked,
 external: $("#optExt").checked,
 advisor: $("#optAdvisor").checked,
+crossBrowser: $("#optXBrowser").checked,
 fetchMode: $("#fetchMode").value,
 customProxy: $("#customProxy").value.trim(),
 linkBudget: clamp(parseInt($("#linkBudget").value, 10) || 0, 0, 600),
@@ -5215,7 +5677,7 @@ origin: new URL(start).origin, host: new URL(start).hostname.toLowerCase(),
 pages: [], findings: [], site: {}, inbound: new Map(),
 refChecks: new Map(), refIndex: new Map(), badFragments: [], stickyFetcher: null,
 assets: new Map(), forms: [], compat: null, sec: null, auth: null, mobile: null, crux: null,
-scores: null, advisor: null, opts
+scores: null, advisor: null, crossBrowser: null, opts
 });
 }
 
